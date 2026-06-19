@@ -93,7 +93,12 @@ function extractPdfPayload(string $path): array
 
 function handleCancel(): void
 {
-    $pidFile = TEMP_DIR . 'cancel.pid';
+    $token = preg_replace('/[^a-f0-9]/', '', (string) ($_POST['token'] ?? ''));
+    if ($token === '') {
+        throw new RuntimeException('Token manquant.');
+    }
+
+    $pidFile = TEMP_DIR . $token . '.pid';
     if (file_exists($pidFile)) {
         $pid = (int) trim((string) file_get_contents($pidFile));
         if ($pid > 0 && posix_kill($pid, 0)) {
@@ -176,7 +181,7 @@ function handleAnalyzeOne(): void
     }
 
     $sectionText = (string) $payload['sections'][$index];
-    $result      = analyzeTextWithOllama($sectionText);
+    $result      = analyzeTextWithOllama($sectionText, $token);
     $normalized  = normalizeResult($result);
 
     jsonResponse(['ok' => true, 'data' => $normalized, 'raw' => $result, 'index' => $index]);
@@ -201,8 +206,8 @@ function handleAnalyze(): void
     $payload = loadSession($token);
 
     $result = $payload['type'] === 'vision'
-        ? analyzeVisionPayload($payload)
-        : analyzeTextWithOllama($payload['content']);
+        ? analyzeVisionPayload($payload, $token)
+        : analyzeTextWithOllama($payload['content'], $token);
 
     $normalized = normalizeResult($result);
 
@@ -500,7 +505,7 @@ function pdfPagesToCompressedImages(string $path, array $pages): array
 
 // ─── Appels Ollama ──────────────────────────────────────────────────────────
 
-function analyzeTextWithOllama(string $text): array
+function analyzeTextWithOllama(string $text, string $token): array
 {
     try {
         return callOllama([
@@ -509,7 +514,7 @@ function analyzeTextWithOllama(string $text): array
             'stream' => false,
             'format' => 'json',
             'options' => ollamaOptions(),
-        ]);
+        ], $token);
     } catch (RuntimeException $e) {
         if (!str_contains($e->getMessage(), 'JSON complet')) {
             throw $e;
@@ -521,11 +526,11 @@ function analyzeTextWithOllama(string $text): array
             'stream' => false,
             'format' => 'json',
             'options' => ollamaOptions(),
-        ]);
+        ], $token);
     }
 }
 
-function analyzeVisionPayload(array $payload): array
+function analyzeVisionPayload(array $payload, string $token): array
 {
     $images = $payload['images'] ?? [];
     if (!is_array($images) || $images === []) {
@@ -534,13 +539,13 @@ function analyzeVisionPayload(array $payload): array
 
     $results = [];
     foreach (array_chunk($images, PDF_VISION_BATCH_SIZE) as $batch) {
-        $results[] = analyzeImagesWithOllama($batch);
+        $results[] = analyzeImagesWithOllama($batch, $token);
     }
 
     return mergeFormationResults($results);
 }
 
-function analyzeImagesWithOllama(array $images): array
+function analyzeImagesWithOllama(array $images, string $token): array
 {
     return callOllama([
         'model'  => visionModel(),
@@ -549,7 +554,7 @@ function analyzeImagesWithOllama(array $images): array
         'stream' => false,
         'format' => 'json',
         'options' => ollamaOptions(),
-    ]);
+    ], $token);
 }
 
 function mergeFormationResults(array $results): array
@@ -571,7 +576,7 @@ function mergeFormationResults(array $results): array
     return ['formations' => $formations];
 }
 
-function callOllama(array $payload): array
+function callOllama(array $payload, string $token): array
 {
     $baseUrl = rtrim((string) (getenv('OLLAMA_URL') ?: 'http://localhost:11434'), '/');
     $ch      = curl_init($baseUrl . '/api/generate');
@@ -586,7 +591,7 @@ function callOllama(array $payload): array
         CURLOPT_TIMEOUT        => ollamaTimeout(),
     ]);
 
-    $pidFile = TEMP_DIR . 'cancel.pid';
+    $pidFile = TEMP_DIR . $token . '.pid';
     if (!is_dir(TEMP_DIR)) mkdir(TEMP_DIR, 0700, true);
     file_put_contents($pidFile, (string) getmypid());
 
@@ -862,6 +867,8 @@ function deleteSession(string $token): void
 {
     $file = TEMP_DIR . $token . '.json';
     if (file_exists($file)) unlink($file);
+    $pidFile = TEMP_DIR . $token . '.pid';
+    if (file_exists($pidFile)) unlink($pidFile);
 }
 
 // ─── Utilitaires ────────────────────────────────────────────────────────────
@@ -1234,10 +1241,12 @@ function renderPage(): void
         const debugPanel  = document.getElementById('debugPanel');
         const debugJson   = document.getElementById('debugJson');
         let   abortCtrl   = null;
+        let   activeToken = null;
 
         cancelButton.addEventListener('click', async () => {
             const body = new FormData();
             body.append('action', 'cancel');
+            if (activeToken) body.append('token', activeToken);
             await fetch(window.location.href, { method: 'POST', body }).catch(() => {});
             if (abortCtrl) abortCtrl.abort();
         });
@@ -1290,6 +1299,7 @@ function renderPage(): void
             abortCtrl = new AbortController();
             const { signal } = abortCtrl;
             let token = null;
+            activeToken = null;
 
             const runTimer = (line, prefix) => {
                 const t0 = Date.now();
@@ -1315,6 +1325,7 @@ function renderPage(): void
                 if (!extractData.ok) throw new Error(extractData.error);
 
                 token = extractData.token;
+                activeToken = token;
                 const isVision = extractData.type === 'vision';
                 termLog(`  ✓ fichier reçu  (${formatSize(file.size)})`, 'ok');
                 termLog(isVision
@@ -1434,6 +1445,7 @@ function renderPage(): void
                     cb.append('token', token);
                     fetch(window.location.href, { method: 'POST', body: cb }).catch(() => {});
                 }
+                activeToken = null;
                 button.disabled = false;
                 cancelButton.style.display = 'none';
                 abortCtrl = null;

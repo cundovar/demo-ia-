@@ -41,6 +41,24 @@ docker compose logs -f app
 
 ---
 
+## Option 1 bis — Coolify
+
+Déploie seulement l'application web depuis le [`Dockerfile`](./Dockerfile).
+Ne réutilise pas le `docker-compose.yml` local tel quel, car il lance aussi Ollama.
+
+Dans Coolify, ajoute ces variables d'environnement à l'application :
+
+```env
+OLLAMA_URL=http://100.65.44.72:11434
+OLLAMA_TEXT_MODEL=gemma3:4b
+OLLAMA_VISION_MODEL=qwen2.5vl:7b
+OLLAMA_TIMEOUT=1800
+```
+
+L'Ollama local doit écouter sur le réseau et rester joignable depuis le conteneur Coolify.
+
+---
+
 ## Option 2 — Lancement manuel (développement)
 
 ### 1. Démarrer Ollama
