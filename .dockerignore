@@ -1,0 +1,7 @@
+.git
+*.md
+run-demo.sh
+sample-formation.txt
+docker-compose.yml
+Dockerfile
+.dockerignore
