@@ -11,6 +11,7 @@ const PDF_VISION_MAX_PAGES  = 15;
 const PDF_IMAGE_DPI         = 80;
 const PDF_JPEG_QUALITY      = 70;
 const TEMP_DIR           = '/tmp/demo_ia_sessions/';
+const ANALYSIS_LOCK_FILE  = '/tmp/demo_ia_sessions.analysis.lock';
 const DEFAULT_TEXT_MODEL  = 'gemma3:4b';
 const DEFAULT_VISION_MODEL = 'qwen2.5vl:7b';
 const FALLBACK_TEXT_CHARS = 6000;
@@ -25,6 +26,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'split'       => handleSplit(),
             'analyze'     => handleAnalyze(),
             'analyze-one' => handleAnalyzeOne(),
+            'analysis-status' => handleAnalysisStatus(),
             'cleanup'     => handleCleanup(),
             'cancel'      => handleCancel(),
             default       => throw new RuntimeException("Action inconnue : {$action}"),
@@ -181,7 +183,7 @@ function handleAnalyzeOne(): void
     }
 
     $sectionText = (string) $payload['sections'][$index];
-    $result      = analyzeTextWithOllama($sectionText, $token);
+    $result      = withAnalysisLock(fn() => analyzeTextWithOllama($sectionText, $token));
     $normalized  = normalizeResult($result);
 
     jsonResponse(['ok' => true, 'data' => $normalized, 'raw' => $result, 'index' => $index]);
@@ -192,6 +194,11 @@ function handleCleanup(): void
     $token = preg_replace('/[^a-f0-9]/', '', (string) ($_POST['token'] ?? ''));
     if ($token !== '') deleteSession($token);
     jsonResponse(['ok' => true]);
+}
+
+function handleAnalysisStatus(): void
+{
+    jsonResponse(['ok' => true, 'busy' => isAnalysisBusy()]);
 }
 
 // ─── Étape 2 : analyse IA ───────────────────────────────────────────────────
@@ -205,14 +212,61 @@ function handleAnalyze(): void
 
     $payload = loadSession($token);
 
-    $result = $payload['type'] === 'vision'
-        ? analyzeVisionPayload($payload, $token)
-        : analyzeTextWithOllama($payload['content'], $token);
+    $result = withAnalysisLock(function () use ($payload, $token) {
+        return $payload['type'] === 'vision'
+            ? analyzeVisionPayload($payload, $token)
+            : analyzeTextWithOllama($payload['content'], $token);
+    });
 
     $normalized = normalizeResult($result);
 
     deleteSession($token);
     jsonResponse(['ok' => true, 'data' => $normalized, 'raw' => $result]);
+}
+
+function withAnalysisLock(callable $callback): mixed
+{
+    if (!is_dir(TEMP_DIR)) {
+        mkdir(TEMP_DIR, 0700, true);
+    }
+
+    $lockHandle = fopen(ANALYSIS_LOCK_FILE, 'c+');
+    if ($lockHandle === false) {
+        throw new RuntimeException('Impossible de verrouiller la file d analyse.');
+    }
+
+    try {
+        if (!flock($lockHandle, LOCK_EX)) {
+            throw new RuntimeException('Impossible de reserver la file d analyse.');
+        }
+
+        return $callback();
+    } finally {
+        flock($lockHandle, LOCK_UN);
+        fclose($lockHandle);
+    }
+}
+
+function isAnalysisBusy(): bool
+{
+    if (!is_dir(TEMP_DIR)) {
+        mkdir(TEMP_DIR, 0700, true);
+    }
+
+    $lockHandle = fopen(ANALYSIS_LOCK_FILE, 'c+');
+    if ($lockHandle === false) {
+        return true;
+    }
+
+    try {
+        $busy = !flock($lockHandle, LOCK_EX | LOCK_NB);
+        if (!$busy) {
+            flock($lockHandle, LOCK_UN);
+        }
+        return $busy;
+    } finally {
+        fclose($lockHandle);
+    }
 }
 
 // ─── Extraction de texte ────────────────────────────────────────────────────
@@ -1279,6 +1333,39 @@ function renderPage(): void
 
         function termClear() { terminal.innerHTML = ''; }
 
+        async function isAnalysisBusy() {
+            const body = new FormData();
+            body.append('action', 'analysis-status');
+            const resp = await fetch(window.location.href, { method: 'POST', body });
+            const data = await resp.json();
+            return !!data.busy;
+        }
+
+        async function waitForAnalysisSlot(signal, line) {
+            let wasBusy = false;
+
+            while (!signal.aborted) {
+                const busy = await isAnalysisBusy();
+                if (!busy) {
+                    return wasBusy;
+                }
+
+                wasBusy = true;
+                line.textContent = '  → attente de la file d analyse…';
+                line.className = 'tl tl-info';
+
+                await new Promise((resolve, reject) => {
+                    const timer = setTimeout(resolve, 1200);
+                    signal.addEventListener('abort', () => {
+                        clearTimeout(timer);
+                        reject(new DOMException('Aborted', 'AbortError'));
+                    }, { once: true });
+                });
+            }
+
+            throw new DOMException('Aborted', 'AbortError');
+        }
+
         function formatSize(bytes) {
             if (bytes < 1024) return bytes + ' o';
             if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + ' Ko';
@@ -1314,6 +1401,12 @@ function renderPage(): void
             try {
                 // ── Étape 1 : extraction ──
                 termLog(`$ upload  ${file.name}  [${formatSize(file.size)}]`, 'cmd');
+
+                const uploadWaitLine = termLog('  → vérification de la file d analyse…', 'info');
+                await waitForAnalysisSlot(signal, uploadWaitLine);
+                uploadWaitLine.textContent = '  ✓ serveur libre, lecture du document…';
+                uploadWaitLine.className = 'tl tl-ok';
+
                 termLog('  → lecture du document…', 'dim');
 
                 const extractBody = new FormData();
@@ -1356,10 +1449,16 @@ function renderPage(): void
                 // ── Étape 3 : analyse ──
                 const allFormations = [];
                 const globalStart   = Date.now();
+                const waitLine = termLog('  → vérification de la disponibilité du serveur…', 'info');
+                await waitForAnalysisSlot(signal, waitLine);
+                waitLine.textContent = '  ✓ serveur libre, analyse démarrée';
+                waitLine.className = 'tl tl-ok';
 
                 if (splitCount > 1) {
                     for (let i = 0; i < splitCount; i++) {
                         if (signal.aborted) break;
+
+                        await waitForAnalysisSlot(signal, waitLine);
 
                         const fNum      = i + 1;
                         const fStart    = Date.now();
@@ -1391,6 +1490,7 @@ function renderPage(): void
                         allFormations.push(...(aData.data?.formations || []));
                     }
                 } else {
+                    await waitForAnalysisSlot(signal, waitLine);
                     const tLine = termLog('  → en attente de la réponse…  0s', 'info');
                     const stopTimer = runTimer(tLine, '  → en attente de la réponse…');
 
@@ -1445,6 +1545,7 @@ function renderPage(): void
                     cb.append('token', token);
                     fetch(window.location.href, { method: 'POST', body: cb }).catch(() => {});
                 }
+                hideWaitModal();
                 activeToken = null;
                 button.disabled = false;
                 cancelButton.style.display = 'none';
