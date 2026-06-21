@@ -1059,6 +1059,17 @@ function renderPage(): void
         header { padding: 28px 32px 18px; border-bottom: 1px solid var(--line); background: var(--panel); }
         h1 { margin: 0 0 8px; font-size: 28px; }
         .subtitle { margin: 0; color: var(--muted); max-width: 760px; line-height: 1.45; }
+        .info-link {
+            margin: 6px 0 0; font-size: 13px; color: var(--text);
+        }
+        .info-link a { color: var(--accent); font-weight: 700; text-decoration: none; }
+        .info-link a:hover { text-decoration: underline; }
+        .warning-queue {
+            margin: 10px 0 0; padding: 10px 14px;
+            background: #fff1f2; border: 1.5px solid #f87171; border-radius: 6px;
+            color: #b91c1c; font-size: 13.5px; line-height: 1.5;
+            max-width: 760px;
+        }
 
         main { display: grid; grid-template-columns: minmax(280px, 420px) 1fr; gap: 24px; padding: 24px 32px 32px; }
 
@@ -1147,12 +1158,68 @@ function renderPage(): void
             main { grid-template-columns: 1fr; padding: 18px; }
             .grid { grid-template-columns: 1fr; }
         }
+
+        /* ── Intro comparatif ── */
+        .intro-cmp {
+            margin: 0 32px 20px;
+            padding: 20px 24px;
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            font-size: 14.5px;
+            line-height: 1.7;
+            color: var(--text);
+        }
+        .intro-cmp p { margin: 0 0 10px; }
+        .intro-cmp p:last-child { margin-bottom: 0; }
+
+        @media (max-width: 860px) { .intro-cmp { margin: 0 18px 16px; } }
+
+        /* ── Tableaux comparatifs ── */
+        .comparatif {
+            margin: 0 32px 40px;
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 28px 28px 24px;
+        }
+        .comparatif h2 { margin: 0 0 16px; font-size: 18px; }
+        .comparatif h2 + h2 { margin-top: 36px; }
+        .comparatif .tbl-wrap { overflow-x: auto; }
+        .comparatif table {
+            width: 100%; border-collapse: collapse; font-size: 13.5px; min-width: 560px;
+        }
+        .comparatif th {
+            background: var(--accent); color: #fff;
+            padding: 10px 14px; text-align: left; font-weight: 700;
+        }
+        .comparatif td {
+            padding: 9px 14px; border-bottom: 1px solid var(--line); vertical-align: top;
+        }
+        .comparatif tr:nth-child(even) td { background: #f9fafb; }
+        .comparatif tr:last-child td { border-bottom: none; }
+        .comparatif td:first-child { font-weight: 700; white-space: nowrap; color: #374151; }
+        .cmp-warn { color: #b45309; }
+        .cmp-good { color: #15803d; }
+        .cmp-badge {
+            display: inline-block; padding: 1px 8px; border-radius: 10px;
+            font-size: 12px; font-weight: 700;
+        }
+        .badge-cloud  { background: #dbeafe; color: #1d4ed8; }
+        .badge-local  { background: #dcfce7; color: #15803d; }
+        .badge-both   { background: #fef9c3; color: #92400e; }
+
+        @media (max-width: 860px) {
+            .comparatif { margin: 0 18px 32px; padding: 18px 14px; }
+        }
     </style>
 </head>
 <body>
     <header>
         <h1>Démo IA Qualiscope</h1>
         <p class="subtitle">Extraction automatique des informations d'une brochure de formation vers un formulaire RH pré-rempli.</p>
+        <p class="warning-queue">⚠ Ce code est conçu pour traiter <strong>une seule analyse à la fois</strong> (afin de ne pas surcharger le serveur — c'est mon PC de travail). Si une analyse est en cours par un autre utilisateur, vous serez automatiquement <strong>mis en attente</strong>.</p>
+        <p class="info-link">Quelques infos utiles &rarr; <a href="#infos">sous le formulaire</a></p>
     </header>
 
     <main>
@@ -1193,7 +1260,7 @@ function renderPage(): void
                 <strong style="color:#b91c1c;font-size:12px;">Limitations actuelles pour l'IA</strong>
                 <table style="margin-top:6px">
                     <?php if (!$hasGpu): ?>
-                    <tr><td>⛔ GPU</td><td class="bad">Pas de GPU dédié → Ollama tourne sur CPU → 1-3 min par analyse</td></tr>
+                    <tr><td>⛔ GPU</td><td class="bad">Pas de GPU dédié → Ollama tourne sur CPU → 3 à 6 min par analyse</td></tr>
                     <?php endif; ?>
                     <?php if ($diskPct >= 70): ?>
                     <tr><td>⚠ Disque</td><td class="<?= $diskCls ?>"><?= $diskPct ?>% utilisé — peu d'espace pour de nouveaux modèles</td></tr>
@@ -1203,14 +1270,6 @@ function renderPage(): void
                     <?php endif; ?>
                     <tr><td>⚠ Serveur</td><td class="warn">PC portable → pas conçu pour un usage serveur continu</td></tr>
                 </table>
-                <div class="suggest">
-                    <strong>Config minimale recommandée pour ce type d'IA</strong>
-                    CPU : 8 cœurs desktop (Ryzen 7 / i7) &nbsp;·&nbsp;
-                    RAM : 32 Go &nbsp;·&nbsp;
-                    GPU : RTX 3060 12 Go minimum (modèles 7B) &nbsp;·&nbsp;
-                    Disque : 100 Go SSD libres &nbsp;·&nbsp;
-                    OS : Linux serveur (Ubuntu / Debian)
-                </div>
             </div>
 
             <div class="status" id="status"></div>
@@ -1282,6 +1341,182 @@ function renderPage(): void
             </div>
         </section>
     </main>
+
+    <div id="infos" class="intro-cmp">
+        <p>
+            Dans cet exemple, j'ai utilisé une petite IA (<strong>Gemma 3</strong>) et une partie de la logique
+            est gérée en PHP (<strong>extraction du texte depuis le PDF</strong>). Mon PC n'étant pas assez
+            puissant pour faire tourner des IA plus performantes, je n'ai pas pu intégrer un modèle avec
+            <strong>Vision</strong> (lecture des images contenues dans le document).
+        </p>
+        <p>
+            Or, certaines informations importantes d'un PDF peuvent se trouver dans des images. Je conseille
+            donc d'utiliser une <strong>IA capable de lire à la fois le texte et les images</strong> pour une
+            analyse complète.
+        </p>
+        <p>
+            De même, une petite IA peut analyser et structurer le texte en sortie, mais reste
+            <strong>peu fiable</strong> : risques d'<strong>erreurs</strong>, d'<strong>oublis</strong>
+            et d'<strong>hallucinations</strong>.
+        </p>
+    </div>
+
+    <div class="intro-cmp">
+        <p>
+            Je pense que la proposition d'<strong>Abdel</strong> est la plus simple et la plus efficace à implémenter
+            dans un premier temps (<strong>via une IA cloud</strong>). De cette manière, on peut rapidement voir des résultats concrets.
+        </p>
+        <p>
+            La solution <strong>100% locale</strong> est, je pense, très intéressante, mais elle demande un
+            <strong>coût initial</strong> et une <strong>complexité d'installation</strong> non négligeables.
+            Son atout majeur : on est totalement souverain et on garde le contrôle total sur les données.
+            En revanche, la maintenabilité de l'infrastructure est à assurer soi-même — contrairement au cloud
+            où c'est géré par le fournisseur.
+        </p>
+        <p>Ci-dessous, vous trouverez des tableaux comparatifs.</p>
+    </div>
+
+    <section class="comparatif">
+        <h2>Comparatif Cloud vs Local</h2>
+        <div class="tbl-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Critère</th>
+                    <th>Cloud (Google AI Studio / Qwen)</th>
+                    <th>100% Local</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>RGPD / confidentialité</td>
+                    <td class="cmp-warn">Risqué — données envoyées chez Google (USA) ou Alibaba (Chine)</td>
+                    <td class="cmp-good">Optimal — rien ne sort</td>
+                </tr>
+                <tr>
+                    <td>Facilité de config</td>
+                    <td class="cmp-good">Très facile (clé API, prêt en 10 min)</td>
+                    <td>Complexe (Ollama + modèle + VPN/Tailscale pour accès extérieur, ~demi-journée)</td>
+                </tr>
+                <tr>
+                    <td>Coût initial</td>
+                    <td class="cmp-good">Zéro</td>
+                    <td>1 500 € minimum viable<br>2 500–3 500 € pour être à l'aise</td>
+                </tr>
+                <tr>
+                    <td>Coût récurrent</td>
+                    <td class="cmp-good">Faible à gratuit (Google AI Studio free tier généreux)</td>
+                    <td class="cmp-good">~0 € (électricité)</td>
+                </tr>
+                <tr>
+                    <td>Puissance de calcul</td>
+                    <td class="cmp-good">Excellente (Gemini 2.0, Qwen2.5-72B)</td>
+                    <td class="cmp-warn">Limitée par le matériel — en dessous de 1 500 € : trop lent pour être utile</td>
+                </tr>
+                <tr>
+                    <td>Qualité des modèles</td>
+                    <td class="cmp-good">Très bonne</td>
+                    <td>Correcte à bonne selon budget — petit budget = petits modèles</td>
+                </tr>
+                <tr>
+                    <td>Maintenabilité</td>
+                    <td class="cmp-good">Zéro (géré par provider)</td>
+                    <td class="cmp-warn">À la charge de l'équipe</td>
+                </tr>
+                <tr>
+                    <td>Disponibilité</td>
+                    <td class="cmp-warn">Dépend d'internet</td>
+                    <td class="cmp-good">Autonome</td>
+                </tr>
+                <tr>
+                    <td>Risque fournisseur</td>
+                    <td class="cmp-warn">Google peut changer les tarifs / Qwen = Alibaba/Chine</td>
+                    <td class="cmp-good">Aucun</td>
+                </tr>
+            </tbody>
+        </table>
+        </div>
+
+        <h2 style="margin-top:36px">Modèles IA : Vision / PDF / JSON / Long contexte</h2>
+        <div class="tbl-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Modèle</th>
+                    <th>Vision / PDF</th>
+                    <th>JSON structuré</th>
+                    <th>Contexte</th>
+                    <th>Dispo</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Gemini 2.5 Pro</td>
+                    <td class="cmp-good">Excellent (PDF natif)</td>
+                    <td>Oui, natif</td>
+                    <td><strong>2 M tokens</strong></td>
+                    <td><span class="cmp-badge badge-cloud">Cloud (AI Studio)</span></td>
+                </tr>
+                <tr>
+                    <td>Gemini 2.0 Flash</td>
+                    <td>Très bon</td>
+                    <td>Oui, natif</td>
+                    <td>1 M tokens</td>
+                    <td><span class="cmp-badge badge-cloud">Cloud (AI Studio, gratuit)</span></td>
+                </tr>
+                <tr>
+                    <td>Gemma 4 31B</td>
+                    <td class="cmp-good">Excellent (OCR, charts)</td>
+                    <td>Oui, natif + function calling</td>
+                    <td>256 K tokens</td>
+                    <td><span class="cmp-badge badge-both">Local ou Cloud</span></td>
+                </tr>
+                <tr>
+                    <td>Gemma 4 27B MoE</td>
+                    <td class="cmp-good">Excellent</td>
+                    <td>Oui, natif</td>
+                    <td>256 K tokens</td>
+                    <td><span class="cmp-badge badge-both">Local ou Cloud</span></td>
+                </tr>
+                <tr>
+                    <td>Gemma 4 E4B</td>
+                    <td>Bon</td>
+                    <td>Oui</td>
+                    <td>128 K tokens</td>
+                    <td><span class="cmp-badge badge-local">Local (laptop)</span></td>
+                </tr>
+                <tr>
+                    <td>Gemma 4 E2B</td>
+                    <td>Correct + audio</td>
+                    <td>Oui</td>
+                    <td>128 K tokens</td>
+                    <td><span class="cmp-badge badge-local">Local (mobile/edge)</span></td>
+                </tr>
+                <tr>
+                    <td>Qwen2.5-VL 72B</td>
+                    <td>Très bon</td>
+                    <td>Oui</td>
+                    <td>128 K tokens</td>
+                    <td><span class="cmp-badge badge-both">Cloud ou Local (lourd)</span></td>
+                </tr>
+                <tr>
+                    <td>Qwen2.5-VL 7B</td>
+                    <td>Correct</td>
+                    <td>Oui</td>
+                    <td>128 K tokens</td>
+                    <td><span class="cmp-badge badge-local">Local (léger)</span></td>
+                </tr>
+                <tr>
+                    <td>Llama 3.2 Vision 11B</td>
+                    <td>Bon</td>
+                    <td>Oui</td>
+                    <td>128 K tokens</td>
+                    <td><span class="cmp-badge badge-local">Local</span></td>
+                </tr>
+            </tbody>
+        </table>
+        </div>
+    </section>
 
     <script>
         const form        = document.getElementById('uploadForm');
