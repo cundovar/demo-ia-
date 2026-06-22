@@ -177,6 +177,7 @@ function handleSplit(): void
 
 function handleAnalyzeOne(): void
 {
+    set_time_limit(0);
     $token = preg_replace('/[^a-f0-9]/', '', (string) ($_POST['token'] ?? ''));
     $index = (int) ($_POST['index'] ?? -1);
     if ($token === '' || $index < 0) throw new RuntimeException('Paramètres manquants.');
@@ -1725,6 +1726,17 @@ function renderPage(): void
             return (bytes / (1024 * 1024)).toFixed(1) + ' Mo';
         }
 
+        // ── Fetch avec retry ──
+        async function fetchWithRetry(url, opts, maxRetries = 3) {
+            let lastErr;
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+                if (attempt > 0) await new Promise(r => setTimeout(r, 2000 * attempt));
+                try { return await fetch(url, opts); }
+                catch (e) { lastErr = e; if (opts.signal?.aborted) throw e; }
+            }
+            throw lastErr;
+        }
+
         // ── Submit ──
         form.addEventListener('submit', async (event) => {
             event.preventDefault();
@@ -1826,8 +1838,13 @@ function renderPage(): void
 
                         let aData;
                         try {
-                            const aResp = await fetch(window.location.href, { method: 'POST', body: aBody, signal });
+                            const aResp = await fetchWithRetry(window.location.href, { method: 'POST', body: aBody, signal });
                             aData = await aResp.json();
+                        } catch (fetchErr) {
+                            stopTimer();
+                            fLine.textContent = `  ✗ formation ${fNum}/${splitCount} : ${fetchErr.message}`;
+                            fLine.className   = 'tl tl-err';
+                            continue;
                         } finally {
                             stopTimer();
                         }
